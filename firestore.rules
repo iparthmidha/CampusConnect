@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isStudent() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "student";
+    }
+    function isFaculty() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "faculty";
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Needed to verify roles
+      allow write: if request.auth.uid == userId; // Users can only write their own profile
+    }
+
+    match /studentAssistants/{studentId} {
+      allow read: if isAuthenticated();
+      // Only the student themselves can write to their own profile, or faculty rating performance
+      allow write: if request.auth.uid == studentId;
+    }
+
+    match /timetables/{timetableId} {
+      allow read: if isAuthenticated();
+      // Only the specific student can update their timetable
+      allow write: if request.auth.uid == resource.data.studentId || request.auth.uid == request.resource.data.studentId;
+    }
+
+    match /assistanceRequests/{requestId} {
+      allow read: if isAuthenticated();
+      
+      // Faculty can create requests. 
+      allow create: if isFaculty() && request.resource.data.facultyId == request.auth.uid;
+      
+      // Faculty can update their own requests.
+      // Students can update requests only if they are accepting/completing them.
+      allow update: if (isFaculty() && resource.data.facultyId == request.auth.uid) ||
+                       (isStudent() && request.resource.data.assignedStudentId == request.auth.uid);
+      
+      allow delete: if isFaculty() && resource.data.facultyId == request.auth.uid;
+      
+      // Matches subcollection
+      match /matches/{matchId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated(); // Anyone can create a notification for someone else
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid; // Can mark as read
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
